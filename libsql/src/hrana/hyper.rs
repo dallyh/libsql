@@ -52,12 +52,13 @@ impl HttpSender {
 
         let resp = self.inner.request(req).await.map_err(HranaError::from)?;
 
-        if resp.status() != StatusCode::OK {
+        let status = resp.status();
+        if status != StatusCode::OK {
             let body = hyper::body::to_bytes(resp.into_body())
                 .await
                 .map_err(HranaError::from)?;
             let body = String::from_utf8(body.into()).unwrap();
-            return Err(HranaError::Api(body));
+            return Err(HranaError::Api(format!("status={}, body={}", status, body)));
         }
 
         let body: super::HttpBody<ByteStream> = if resp.is_end_stream() {
@@ -160,6 +161,11 @@ impl Conn for HttpConnection<HttpSender> {
                 }
             })),
         })
+    }
+
+    fn interrupt(&self) -> crate::Result<()> {
+        // Interrupt is a no-op for remote connections.
+        Ok(())
     }
 
     fn is_autocommit(&self) -> bool {
@@ -340,6 +346,11 @@ impl Conn for HranaStream<HttpSender> {
         _tx_behavior: crate::TransactionBehavior,
     ) -> crate::Result<crate::transaction::Transaction> {
         todo!("sounds like nested transactions innit?")
+    }
+
+    fn interrupt(&self) -> crate::Result<()> {
+        // Interrupt is a no-op for remote connections.
+        Ok(())
     }
 
     fn is_autocommit(&self) -> bool {
