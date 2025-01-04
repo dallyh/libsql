@@ -463,7 +463,7 @@ fn atomic_rename(p1: impl AsRef<Path>, p2: impl AsRef<Path>) -> anyhow::Result<(
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
 fn atomic_rename(p1: impl AsRef<Path>, p2: impl AsRef<Path>) -> anyhow::Result<()> {
     use anyhow::Context;
     use nix::fcntl::{renameat2, RenameFlags};
@@ -478,6 +478,28 @@ fn atomic_rename(p1: impl AsRef<Path>, p2: impl AsRef<Path>) -> anyhow::Result<(
     .with_context(|| {
         format!(
             "failed to perform snapshot file swap {} -> {}",
+            p1.as_ref().display(),
+            p2.as_ref().display()
+        )
+    })?;
+
+    Ok(())
+}
+
+#[cfg(all(target_os = "linux", target_env = "musl"))]
+fn atomic_rename(p1: impl AsRef<Path>, p2: impl AsRef<Path>) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use nix::fcntl::renameat;
+
+    renameat(
+        None, 
+        p1.as_ref(), 
+        None, 
+        p2.as_ref()
+    )
+    .with_context(|| {
+        format!(
+            "failed to rename {} -> {}",
             p1.as_ref().display(),
             p2.as_ref().display()
         )
