@@ -463,7 +463,7 @@ fn atomic_rename(p1: impl AsRef<Path>, p2: impl AsRef<Path>) -> anyhow::Result<(
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
 fn atomic_rename(p1: impl AsRef<Path>, p2: impl AsRef<Path>) -> anyhow::Result<()> {
     use anyhow::Context;
     use nix::fcntl::{renameat2, RenameFlags};
@@ -484,6 +484,48 @@ fn atomic_rename(p1: impl AsRef<Path>, p2: impl AsRef<Path>) -> anyhow::Result<(
     })?;
 
     Ok(())
+}
+
+// https://github.com/indianakernick/renamore/issues/1
+// https://git.musl-libc.org/cgit/musl/tree/src/linux/renameat2.c
+// https://git.musl-libc.org/cgit/musl/commit/?id=05ce67fea99ca09cd4b6625cff7aec9cc222dd5a
+
+#[cfg(all(target_os = "linux", target_env = "musl"))]
+fn atomic_rename(p1: impl AsRef<Path>, p2: impl AsRef<Path>) -> anyhow::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::ffi::CString;
+    use std::io;
+    
+    use libc::{c_char, c_long, AT_FDCWD, SYS_renameat2};
+
+    const RENAME_EXCHANGE: libc::c_uint = 0x2; // Flag for atomic swap
+
+    let p1_cstr = CString::new(p1.as_ref().as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid path"))?;
+    let p2_cstr = CString::new(p2.as_ref().as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid path"))?;
+
+    let result = unsafe {
+        libc::syscall(
+            SYS_renameat2,
+            AT_FDCWD as c_long,
+            p1_cstr.as_ptr() as *const c_char,
+            AT_FDCWD as c_long,
+            p2_cstr.as_ptr() as *const c_char,
+            RENAME_EXCHANGE,
+        )
+    };
+
+    if result == 0 {
+        Ok(())
+    } else {
+        let errno = io::Error::last_os_error();
+        Err(anyhow::anyhow!(errno).context(format!(
+            "failed to perform snapshot file swap {} -> {}",
+            p1.as_ref().display(),
+            p2.as_ref().display()
+        )))
+    }
 }
 
 #[derive(Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::FromZeroes, zerocopy::AsBytes)]
